@@ -1,0 +1,95 @@
+1、使用：
+检查hass版本为0.72.1
+将homeassistant覆盖到python安装目录的site-packages下，比如Windows下为：C:\Users\Dylan\AppData\Local\Programs\Python\Python36\Lib\site-packages
+覆盖前请先备份原文件夹
+
+2、配置：
+camera配置：
+当不做任何修改时，将自动返回hass所发现的onvif的实时播放地址，通过hass主页的状态页面（<>那个图标）可以看到：
+比如：
+camera.onvif_camera	idle	access_token: a1cb5f3a244062644621271d44a83fe825f7e92801852df68face8c6e2e5634b
+							preview_url: rtsp://xxxxx:12345678@192.168.0.123/user=xxxxx_password=12345678_channel=1_stream=0.sdp?real_stream
+							friendly_name: 摄像头
+							entity_picture: /api/camera_proxy/camera.onvif_camera?token=a1cb5f3a244062644621271d44a83fe825f7e92801852df68face8c6e2e5634b
+其中的preview_url即为rtsp播放地址
+如果需要在外网访问，需要您的设备具有公网IP（或者DDNS等），并完成端口映射后，修改您的配置文件形如：
+camera:
+  - platform: onvif
+    host: 192.168.0.123
+    port: 8899
+    preview_url: "rtsp://xxxxx:12345678@xxx.mydomain.com:6666/user=xxxxx_password=12345678_channel=1_stream=0.sdp?real_stream"	
+其中preview_url即是您所需要添加的一行配置，这个地址请根据上述状态返回的preview_url，并结合你完成的端口映射进行设置即可。
+然后重启hass服务，在状态中将返回您所设置的preview_url地址。
+
+switch配置：
+由于通过射频控制的开关无法获取当前开关的状态信息，而部分wifi开关或者broadlink开关是可以获取到状态信息的。
+为了在您自己的APP中区分出某一个开关是否可以获取状态，在配置中增加了is_stateful项目指定该配置是否可获取状态，比如：
+  - platform: template
+    switches:
+      livingroom_skylight:
+        value_template: "{{ is_state('switch.source', 'on') }}"
+        is_stateful: false
+        turn_on:
+          service: remote.send_command
+          entity_id: remote.ir_remote
+          data:
+            command: "raw:Z6WtAPcBAACIAgAA6gYAAOkRAADuIgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA0ICAQICAgICAQIBAgECAQECAgIBAQIBAgICAQEDQgIBAgICAgIBAgECAQIBAQICAgEBAgECAgIBAQNCAgECAgICAgECAQIBAgEBAgICAQECAQICAgEAA="
+        turn_off:
+          service: remote.send_command
+          entity_id: remote.ir_remote
+          data:
+            command: "raw:Z6WtALkBAAD2AQAAiwIAAMgCAACkBgAA7gYAAOYRAADdIgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABnUVFRUSFRUVEhUVFRIVEhIVEhIVFRIVEhUUEhIWdRUVFRIVFRUSFRUVEhUSEhUSEhUVEhUSFRUSEhZ1FRUVEhUVFRIVFRUTBRISFRISFRUSFRIVFRIQE="
+其中is_stateful即为增加的一行配置，通过设置该值（可选，默认为true），可设置在获取设备时的属性值is_stateful，比如获取到的属性值为：
+ switch.livingroom_skylight	off		is_stateful: false
+									friendly_name: 客厅顶灯
+ switch.livingroom_tv		off		is_stateful: true
+									friendly_name: 客厅电视
+上述例子中，livingroom_skylight因为设置了is_stateful为false，故返回的属性中is_stateful也为false
+
+3、关于hass代码修改的一点经验：
+其实hass所有的组件都在site-packages\homeassistant\components中，
+参考您的配置文件，配置文件的第一级对应components下的第一级目录，比如camera对应site-packages\homeassistant\components\camera目录
+在该目录下，存在__init__.py，该文件中定义该类型设备的基类（比如camera的基类是Camera），包含该类型设备的基本功能代码，其中，在状态页面中为每一种设备可以返回哪些属性，则由该基类的state_attributes属性设置，例如：
+	@property
+    def state_attributes(self):
+        """Return the camera state attributes."""
+        attrs = {
+            'access_token': self.access_tokens[-1],
+        }
+所以，要想在状态页返回更多的属性，则从这里想办法
+其次，在配置文件中对应设备下的- platform:则对应该文件夹下的同名py文件，比如onvif对应site-packages\homeassistant\components\camera\onvif.py
+在这里面，必然存在一个类会从派生自基类（可以通过(基类名称)进行搜索），比如onvif的类定义如下：
+class ONVIFHassCamera(Camera):
+    """An implementation of an ONVIF camera."""
+在这里面，会读取配置文件的配置项目，一般在__init__中完成加载，所以要增加新的配置项就从这里下手
+需要注意一点的是，新增加的配置文件需要进行声明，比如：
+ONVIF_DATA = "onvif"
+ENTITIES = "entities"
+
+PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
+    vol.Required(CONF_HOST): cv.string,
+    vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
+    vol.Optional(CONF_PASSWORD, default=DEFAULT_PASSWORD): cv.string,
+    vol.Optional(CONF_USERNAME, default=DEFAULT_USERNAME): cv.string,
+    vol.Optional(CONF_PREVIEW_URL): cv.string,
+    vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
+    vol.Optional(CONF_EXTRA_ARGUMENTS, default=DEFAULT_ARGUMENTS): cv.string,
+    vol.Optional(CONF_PROFILE, default=DEFAULT_PROFILE):
+        vol.All(vol.Coerce(int), vol.Range(min=0)),
+})
+否则会出现部分设备不认新增加的配置项的情况。
+然后，如果要将派生类中的属性返回给基类，请采用属性重载的方式，比如camera的修改方式：
+在__init__.py的基类中增加：
+    @property
+    def preview_url(self):
+        """Return the preview url of camera."""
+        return None
+然后在onvif.py的派生类中增加：  
+    @property
+    def preview_url(self):
+        if self._preview != None and self._preview != "":
+            return self._preview
+        if not self._input:
+            self.obtain_input_uri() 
+        return self._input
+至此，基本能够完成配置项增加和状态增加的修改。                  
