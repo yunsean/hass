@@ -46,6 +46,22 @@ switch配置：
 									friendly_name: 客厅电视
 上述例子中，livingroom_skylight因为设置了is_stateful为false，故返回的属性中is_stateful也为false
 
+gps track配置（特殊客制化）：
+当同时使用router和gps进行设备跟踪时，可能有这种情况：有些场景需要在人员回到家（设备连接到路由器上）才执行，而当同时开启gps时，会发现，当到达距离家一定距离（比如100m）时，则home assisitant认为人已经到家，提前执行了该场景。
+这个修改的目的就是，当gps模块检测到人员当前属于home这个zone，并不修改人员的状态为home，而是维持之前的状态，从而只能通过router才能实现tracker状态变为home。
+修改文件为device_tracker/__init__.py
+修改位置：
+        elif self.gps is not None and self.source_type == SOURCE_TYPE_GPS:
+            zone_state = async_active_zone(
+                self.hass, self.gps[0], self.gps[1], self.gps_accuracy)
+            if zone_state is None:
+                self._state = STATE_NOT_HOME
+#            elif zone_state.entity_id == zone.ENTITY_ID_HOME:
+#                self._state = STATE_HOME
+#            else:
+            elif zone_state.entity_id != zone.ENTITY_ID_HOME:
+                self._state = zone_state.name
+
 3、关于hass代码修改的一点经验：
 其实hass所有的组件都在site-packages\homeassistant\components中，
 参考您的配置文件，配置文件的第一级对应components下的第一级目录，比如camera对应site-packages\homeassistant\components\camera目录
