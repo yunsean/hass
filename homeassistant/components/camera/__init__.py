@@ -253,10 +253,17 @@ class Camera(Entity):
         """Return the camera brand."""
         return None
 
+#{{{dylan
+    @property
+    def tts_sensor(self):
+        """Return the entity that can send message to tts."""
+        return None
+        
     @property
     def preview_url(self):
         """Return the preview url of camera."""
         return None
+#}}}        
 
     @property
     def motion_detection_enabled(self):
@@ -379,8 +386,13 @@ class Camera(Entity):
         if self.brand:
             attrs['brand'] = self.brand
             
+ #{{{dylan            
+        if self.tts_sensor:
+            attrs['tts_sensor'] = self.tts_sensor 
+
         if self.preview_url:
             attrs['preview_url'] = self.preview_url            
+#}}}            
 
         if self.motion_detection_enabled:
             attrs['motion_detection'] = self.motion_detection_enabled

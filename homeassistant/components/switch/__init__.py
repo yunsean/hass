@@ -151,17 +151,22 @@ class SwitchDevice(ToggleEntity):
         """Return true if device is in standby."""
         return None
 
+#{{{dylan
     @property
     def is_stateful(self):
         """Return false if device is not stateful."""
         return True
+#}}}        
 
     @property
     def state_attributes(self):
         """Return the optional state attributes."""
+#{{{dylan
+        #data = {}        
         data = {
             'is_stateful': self.is_stateful,
         }
+#}}}        
 
         for prop, attr in PROP_TO_ATTR.items():
             value = getattr(self, prop)

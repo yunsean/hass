@@ -544,11 +544,14 @@ class Device(Entity):
                 self.hass, self.gps[0], self.gps[1], self.gps_accuracy)
             if zone_state is None:
                 self._state = STATE_NOT_HOME
-#            elif zone_state.entity_id == zone.ENTITY_ID_HOME:
-#                self._state = STATE_HOME
-#            else:
+#{{{dylan
+            # elif zone_state.entity_id == zone.ENTITY_ID_HOME:
+            #     self._state = STATE_HOME
+            # else:
+            #     self._state = zone_state.name                
             elif zone_state.entity_id != zone.ENTITY_ID_HOME:
                 self._state = zone_state.name
+#}}}                
         elif self.stale():
             self._state = STATE_NOT_HOME
             self.gps = None

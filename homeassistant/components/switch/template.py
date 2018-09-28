@@ -25,7 +25,9 @@ from homeassistant.helpers.script import Script
 _LOGGER = logging.getLogger(__name__)
 _VALID_STATES = [STATE_ON, STATE_OFF, 'true', 'false']
 
+#{{{dylan
 CONF_IS_STATEFUL = "is_stateful"
+#}}}
 ON_ACTION = 'turn_on'
 OFF_ACTION = 'turn_off'
 
@@ -36,8 +38,10 @@ SWITCH_SCHEMA = vol.Schema({
     vol.Required(ON_ACTION): cv.SCRIPT_SCHEMA,
     vol.Required(OFF_ACTION): cv.SCRIPT_SCHEMA,
     vol.Optional(ATTR_FRIENDLY_NAME): cv.string,
-    vol.Optional(ATTR_ENTITY_ID): cv.entity_ids,
-    vol.Optional(CONF_IS_STATEFUL): cv.boolean
+#{{{dylan    
+    vol.Optional(CONF_IS_STATEFUL): cv.boolean,
+#}}}    
+    vol.Optional(ATTR_ENTITY_ID): cv.entity_ids
 })
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
@@ -59,10 +63,7 @@ def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
         on_action = device_config[ON_ACTION]
         off_action = device_config[OFF_ACTION]
         entity_ids = (device_config.get(ATTR_ENTITY_ID) or
-                      state_template.extract_entities())
-        is_stateful = device_config.get(CONF_IS_STATEFUL)
-        if is_stateful == None:
-            is_stateful = True
+                      state_template.extract_entities())       
 
         state_template.hass = hass
 
@@ -72,12 +73,23 @@ def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
         if entity_picture_template is not None:
             entity_picture_template.hass = hass
 
+#{{{dylan   
+        is_stateful = device_config.get(CONF_IS_STATEFUL)
+        if is_stateful == None:
+            is_stateful = True
+        # switches.append(
+        #     SwitchTemplate(
+        #         hass, device, friendly_name, state_template,
+        #         icon_template, entity_picture_template, on_action,
+        #         off_action, entity_ids)
+        #     )
         switches.append(
             SwitchTemplate(
                 hass, device, friendly_name, state_template,
                 icon_template, entity_picture_template, on_action,
                 off_action, entity_ids, is_stateful)
-            )
+            )  
+#}}} 
     if not switches:
         _LOGGER.error("No switches added")
         return False
@@ -89,9 +101,16 @@ def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
 class SwitchTemplate(SwitchDevice):
     """Representation of a Template switch."""
 
+#{{{dylan
+    # def __init__(self, hass, device_id, friendly_name, state_template,
+    #              icon_template, entity_picture_template, on_action,
+    #              off_action, entity_ids):
     def __init__(self, hass, device_id, friendly_name, state_template,
                  icon_template, entity_picture_template, on_action,
-                 off_action, entity_ids, is_stateful):
+                 off_action, entity_ids, is_stateful):  
+        self._stateful = is_stateful
+#}}}  
+
         """Initialize the Template switch."""
         self.hass = hass
         self.entity_id = async_generate_entity_id(
@@ -104,7 +123,6 @@ class SwitchTemplate(SwitchDevice):
         self._icon_template = icon_template
         self._entity_picture_template = entity_picture_template
         self._icon = None
-        self._stateful = is_stateful
         self._entity_picture = None
         self._entities = entity_ids
 
@@ -157,10 +175,12 @@ class SwitchTemplate(SwitchDevice):
         """Return the entity_picture to use in the frontend, if any."""
         return self._entity_picture
 
+#{{{dylan
     @property
     def is_stateful(self):
         """Return false if device is not stateful."""
         return self._stateful
+#}}}        
 
     @asyncio.coroutine
     def async_turn_on(self, **kwargs):

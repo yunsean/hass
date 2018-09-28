@@ -37,7 +37,10 @@ DEFAULT_ARGUMENTS = '-q:v 2'
 DEFAULT_PROFILE = 0
 
 CONF_PROFILE = "profile"
+#{{{dylan
 CONF_PREVIEW_URL = "preview_url"
+CONF_TTS_SENSOR = "tts_sensor"
+#}}}
 
 ATTR_PAN = "pan"
 ATTR_TILT = "tilt"
@@ -60,7 +63,10 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_NAME, default=DEFAULT_NAME): cv.string,
     vol.Optional(CONF_PASSWORD, default=DEFAULT_PASSWORD): cv.string,
     vol.Optional(CONF_USERNAME, default=DEFAULT_USERNAME): cv.string,
+#{{{dylan    
     vol.Optional(CONF_PREVIEW_URL): cv.string,
+    vol.Optional(CONF_TTS_SENSOR): cv.string,
+#}}}    
     vol.Optional(CONF_PORT, default=DEFAULT_PORT): cv.port,
     vol.Optional(CONF_EXTRA_ARGUMENTS, default=DEFAULT_ARGUMENTS): cv.string,
     vol.Optional(CONF_PROFILE, default=DEFAULT_PROFILE):
@@ -111,7 +117,10 @@ class ONVIFHassCamera(Camera):
 
         self._username = config.get(CONF_USERNAME)
         self._password = config.get(CONF_PASSWORD)
+#{{{dylan
         self._preview = config.get(CONF_PREVIEW_URL)
+        self._tts = config.get(CONF_TTS_SENSOR)
+#}}}        
         self._host = config.get(CONF_HOST)
         self._port = config.get(CONF_PORT)
         self._name = config.get(CONF_NAME)
@@ -235,6 +244,7 @@ class ONVIFHassCamera(Camera):
         """Return the name of this camera."""
         return self._name
         
+#{{{dylan        
     @property
     def preview_url(self):
         if self._preview != None and self._preview != "":
@@ -242,3 +252,10 @@ class ONVIFHassCamera(Camera):
         if not self._input:
             self.obtain_input_uri() 
         return self._input
+
+    @property
+    def tts_sensor(self):
+        if self._tts != None and self._tts != "":
+            return self._tts
+        return None
+#}}}
