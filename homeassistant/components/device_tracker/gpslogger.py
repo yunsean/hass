@@ -5,7 +5,9 @@ For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/device_tracker.gpslogger/
 """
 import logging
+#{{{dylan  
 import time
+#}}}
 from hmac import compare_digest
 
 from aiohttp.web import Request, HTTPUnauthorized  # NOQA
