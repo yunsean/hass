@@ -101,8 +101,6 @@ class AudioPlayer:
     def path_observer(self, _name, value):
         self._url = value
         self.update_state()
-        _LOGGER.error(self._nexter)
-        _LOGGER.error(value)
         if self._nexter and not value:
             self._nexter.next()
         
@@ -155,7 +153,6 @@ class AudioPlayer:
         yield from self.async_stop()       
         if self._adjst:
             try:
-                _LOGGER.error("try to adjust volume to max")   
                 import win32api
                 WM_APPCOMMAND = 0x319
                 APPCOMMAND_VOLUME_MAX = 0x0a
@@ -187,8 +184,7 @@ class AudioPlayer:
         self._url = None
         self.update_state() 
         if self._adjst:
-            try:
-                _LOGGER.error("try to adjust volume to max")   
+            try: 
                 import win32api
                 WM_APPCOMMAND = 0x319
                 APPCOMMAND_VOLUME_MAX = 0x0a
