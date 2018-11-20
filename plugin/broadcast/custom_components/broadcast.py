@@ -89,8 +89,7 @@ class AudioPlayer:
         self._url = None
         self._volume = 50
         self._adjst = adjust_volume
-        self._latestUrl = None
-        self._latestPlatform = None
+        self._platform = None
         self._channels = None
         self._nexter = None
         self._nexterExt = None
@@ -113,46 +112,35 @@ class AudioPlayer:
         self.update_state()
     def update_state(self):
         if self._hass != None:
-            self._hass.states.async_set(DOMAIN + ".xmly", "off" if (self._url == None or self._latestPlatform != "xmly")  else "on", {
-               "url": str(self._latestUrl) if self._latestPlatform == "xmly" else "None",
-               "volume": str(self._volume),
-               "name": "xmly",
-               "friendly_name": "喜马拉雅FM"
-            })
-            self._hass.states.async_set(DOMAIN + ".qtfm", "off" if (self._url == None or self._latestPlatform != "qtfm")  else "on", {
-               "url": str(self._latestUrl) if self._latestPlatform == "qtfm" else "None",
-               "volume": str(self._volume),
-               "name": "qtfm",
-               "friendly_name": "蜻蜓FM"
-            })
-            self._hass.states.async_set(DOMAIN + ".voice", "off" if (self._url == None or self._latestPlatform != "voice")  else "on", {
+            self._hass.states.async_set(DOMAIN + ".voice", "off" if (self._url == None or self._platform != "voice")  else "on", {
                "volume": str(self._volume),
                "name": "voice",
-               "friendly_name": "语音播放"
+               "friendly_name": "voice"
             })
             if self._channels:
                 for channel in self._channels:
-                    self._hass.states.async_set(DOMAIN + "." + channel, "off" if (self._url == None or self._latestPlatform != channel)  else "on", {
-                        "url": str(self._latestUrl) if self._latestPlatform == channel else "None",
-                       "volume": str(self._volume),
-                       "name": channel,
-                       "friendly_name": "音乐频道"
+                    self._hass.states.async_set(DOMAIN + "." + channel, "off" if (self._url == None or self._platform != channel)  else "on", {
+                        "url": str(self._url) if (self._platform == channel and self._url) else "None",
+                        "volume": str(self._volume),
+                        "name": channel,
+                        "friendly_name": channel
                     })
         
     @asyncio.coroutine
-    def async_play(self, url = None, volume = None, platform = None, nexter=None):
+    def async_play(self, url = None, volume = None, platform = None, nexter=None, intercut=False):
         if url == None:
-            url = self._latestUrl
-        if url == None:
-            return
-        self._latestUrl = None
+            return 
         if volume != None:
             self._volume = volume
         if platform != None:
-            self._latestPlatform = platform
-        yield from self.async_stop()       
+            self._platform = platform
+        if self._ffplay:
+            self._ffplay.terminate()
+            self._url = None
+            self.update_state()       
         if self._adjst:
             try:
+                _LOGGER.error("try to adjust volume to max")   
                 import win32api
                 WM_APPCOMMAND = 0x319
                 APPCOMMAND_VOLUME_MAX = 0x0a
@@ -163,28 +151,28 @@ class AudioPlayer:
         self._ffplay = mpv.MPV(ytdl=True, volume=self._volume)
         self._ffplay.observe_property("path", self.path_observer)
         self._ffplay.play(url)
-        self._latestUrl = url
-        self._nexter = nexter
-        self._nexterExt = nexter
+        if intercut and not nexter:
+            self._nexter = self._nexterExt
+        else:
+            self._nexter = nexter
+            self._nexterExt = nexter 
         
-    def play(self, url = None, volume = None, platform = None, nexter=None):
-        if url == None:
-            url = self._latestUrl
+    def play(self, url = None, volume = None, platform = None, nexter=None, intercut=False):
         if url == None:
             return
-        self._latestUrl = None
+        self._intercut = False  
         if volume != None:
             self._volume = volume
         if platform != None:
-            self._latestPlatform = platform
+            self._platform = platform
         self._nexter = None
-        if self._ffplay == None:
-            return
-        self._ffplay.terminate()
-        self._url = None
-        self.update_state() 
+        if self._ffplay:
+            self._ffplay.terminate()
+            self._url = None
+            self.update_state() 
         if self._adjst:
-            try: 
+            try:
+                _LOGGER.error("try to adjust volume to max")   
                 import win32api
                 WM_APPCOMMAND = 0x319
                 APPCOMMAND_VOLUME_MAX = 0x0a
@@ -195,9 +183,11 @@ class AudioPlayer:
         self._ffplay = mpv.MPV(ytdl=True, volume=self._volume)
         self._ffplay.observe_property("path", self.path_observer)
         self._ffplay.play(url)
-        self._latestUrl = url
-        self._nexter = nexter
-        self._nexterExt = nexter    
+        if intercut and not nexter:
+            self._nexter = self._nexterExt
+        else:
+            self._nexter = nexter
+            self._nexterExt = nexter 
              
     @asyncio.coroutine
     def async_set_volume(self, vol):
@@ -205,7 +195,7 @@ class AudioPlayer:
         url = self._url
         if url != None:
             yield from self.async_stop()
-            yield from self.async_play(url)
+            yield from self.async_play(url, nexter=self._nexterExt)
             
     @asyncio.coroutine
     def async_add_volume(self):
@@ -224,11 +214,10 @@ class AudioPlayer:
     @asyncio.coroutine
     def async_toggle(self):
         if self._url == None:
-            if self._latestUrl == None:
-                return
-            self._nexter = self._nexterExt
-            yield from self.async_play(self._latestUrl)
+            if self._nexterExt and not value:
+                self._nexterExt.next()
         else:    
+            self._nexterExt = None
             self._nexter = None
             self._ffplay.terminate()
             self._url = None
@@ -237,6 +226,7 @@ class AudioPlayer:
         
     @asyncio.coroutine
     def async_stop(self):
+        self._nexterExt = None
         self._nexter = None
         if self._ffplay == None:
             return
@@ -247,14 +237,14 @@ class AudioPlayer:
 TOKEN_INTERFACE = 'https://openapi.baidu.com/oauth/2.0/token'
 TEXT2AUDIO_INTERFACE = 'http://tsn.baidu.com/text2audio'
 class BaiduTTS:
-    def __init__(self, basePath, apiKey, secretKey, speed = 5, pitch = 5, volume = 15, person = 0):
+    def __init__(self, player, basePath, apiKey, secretKey, speed = 5, pitch = 5, volume = 15, person = 0):
         self.apiKey = apiKey
         self.secretKey = secretKey
         self.speed = speed
         self.pitch = pitch
         self.volume = volume
         self.person = person
-        self.player = AudioPlayer(None, False)
+        self.player = AudioPlayer(None, True)
         self._mp3Path = ("" if (basePath == None) else basePath) + "/broadcast_tts.mp3"
         token = self.get_token()
         self.token = token
@@ -324,7 +314,7 @@ class BaiduTTS:
             if not self.generate_tts(message, self._mp3Path):
                 _LOGGER.error("generate tts failed.")
                 return False    
-            yield from self.player.async_play(self._mp3Path, volume)
+            yield from self.player.async_play(self._mp3Path, volume, "tts", intercut=True)
         except Exception as error:
             _LOGGER.error(error)
             return False
@@ -355,7 +345,7 @@ class VoiceUploader(HomeAssistantView):
                     if not data:
                         break
                     fil.write(data)
-            yield from self.player.async_play(self._mp3Path, volume, "voice")
+            yield from self.player.async_play(self._mp3Path, volume, "voice", intercut=True)
             return "playing"
             
 
@@ -384,7 +374,24 @@ class FileListViewer(HomeAssistantView):
         response.content_length = len(result)
         await response.prepare(request)
         await response.write(result)
-        return response               
+        return response  
+
+class RadioPlayer:
+    def __init__(self, name, platform, player):
+        self._platform = platform
+        self._player = player
+        self._url = None
+        self._name = name
+    @asyncio.coroutine
+    def async_play(self, url = None, volume = None):
+        if not url:
+            url = self._url
+        self._url = url    
+        yield from self._player.async_play(url, volume=volume, platform=self._platform, nexter=self) 
+    def next(self): 
+        self._player.play(self._url, platform=self._platform, nexter=self)
+    def name(self):
+        return self._name
         
 class FilePlayer:
     def __init__(self, channel, rootPath, player):
@@ -392,7 +399,7 @@ class FilePlayer:
         self.player = player
         self.allFile = []
         self.rootPath = rootPath.rstrip('/')
-        self.getFiles(self.allFile, self.rootPath, ['.mp3', '.aac', '.flac', '.wav'])
+        self.getFiles(self.allFile, self.rootPath, ['.mp3', '.aac', '.flac', '.wav', '.DTS', '.MP3'])
         _LOGGER.error(rootPath + ' contain ' + str(len(self.allFile)) + ' files')
     def getFiles(self, allfiles, dir, extensions):
         for root, dirs, files in os.walk(dir):
@@ -420,6 +427,8 @@ class FilePlayer:
         for file in self.allFile:
             result.append(file.replace(self.rootPath, ''))
         return json.dumps(result)
+    def name(self):
+        return self._channel
         
 @asyncio.coroutine
 def async_setup(hass, config):
@@ -435,15 +444,15 @@ def async_setup(hass, config):
     person = conf.get(CONF_PERSON, 0) 
     channels = conf.get(CONF_CHANNELS)
     filePlayers = {}
-    tts = BaiduTTS(basePath, apiKey, secretKey, speed, pitch, volume, person)    
+    tts = BaiduTTS(player, basePath, apiKey, secretKey, speed, pitch, volume, person)    
     hass.http.register_view(VoiceUploader(basePath, player))
+    filePlayers['xmly'] = RadioPlayer('喜马拉雅', 'xmly', player) 
+    filePlayers['qtfm'] = RadioPlayer('蜻蜓FM', 'qtfm', player) 
     if channels:
-        channelNames = []
         for channel in channels:
             for key in channel:
-                channelNames.append(key)
                 filePlayers[key] = FilePlayer(key, channel[key], player)    
-        player.set_channels(channelNames)
+        player.set_channels(filePlayers.keys())
     hass.http.register_view(FileListViewer(filePlayers))
         
     @asyncio.coroutine
