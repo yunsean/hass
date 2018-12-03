@@ -29,6 +29,8 @@ from homeassistant.const import (
     ATTR_ENTITY_ID, HTTP_UNPROCESSABLE_ENTITY
 )
 
+SERVICE_TURN_ON = "turn_on"
+SERVICE_TURN_OFF = "turn_off"
 SERVICE_PLAY = "play"
 SERVICE_STOP = "stop"
 SERVICE_TOGGLE = "toggle"
@@ -151,11 +153,12 @@ class AudioPlayer:
         self._ffplay = mpv.MPV(ytdl=True, volume=self._volume)
         self._ffplay.observe_property("path", self.path_observer)
         self._ffplay.play(url)
-        if intercut and not nexter:
-            self._nexter = self._nexterExt
-        else:
+        if nexter:
             self._nexter = nexter
             self._nexterExt = nexter 
+        elif not intercut:
+            self._nexter = None
+            self._nexterExt = None
         
     def play(self, url = None, volume = None, platform = None, nexter=None, intercut=False):
         if url == None:
@@ -165,7 +168,6 @@ class AudioPlayer:
             self._volume = volume
         if platform != None:
             self._platform = platform
-        self._nexter = None
         if self._ffplay:
             self._ffplay.terminate()
             self._url = None
@@ -182,12 +184,14 @@ class AudioPlayer:
                 _LOGGER.warn("Not found win32api module")    
         self._ffplay = mpv.MPV(ytdl=True, volume=self._volume)
         self._ffplay.observe_property("path", self.path_observer)
+        _LOGGER.error(str(url))
         self._ffplay.play(url)
-        if intercut and not nexter:
-            self._nexter = self._nexterExt
-        else:
+        if nexter:
             self._nexter = nexter
             self._nexterExt = nexter 
+        elif not intercut:
+            self._nexter = None
+            self._nexterExt = None
              
     @asyncio.coroutine
     def async_set_volume(self, vol):
@@ -214,10 +218,9 @@ class AudioPlayer:
     @asyncio.coroutine
     def async_toggle(self):
         if self._url == None:
-            if self._nexterExt and not value:
+            if self._nexterExt:
                 self._nexterExt.next()
         else:    
-            self._nexterExt = None
             self._nexter = None
             self._ffplay.terminate()
             self._url = None
@@ -226,7 +229,6 @@ class AudioPlayer:
         
     @asyncio.coroutine
     def async_stop(self):
-        self._nexterExt = None
         self._nexter = None
         if self._ffplay == None:
             return
@@ -399,7 +401,7 @@ class FilePlayer:
         self.player = player
         self.allFile = []
         self.rootPath = rootPath.rstrip('/')
-        self.getFiles(self.allFile, self.rootPath, ['.mp3', '.aac', '.flac', '.wav', '.DTS', '.MP3'])
+        self.getFiles(self.allFile, self.rootPath, ['.mp3', '.aac', '.flac', '.wav', '.DTS', '.MP3', '.ape', '.WAV'])
         _LOGGER.error(rootPath + ' contain ' + str(len(self.allFile)) + ' files')
     def getFiles(self, allfiles, dir, extensions):
         for root, dirs, files in os.walk(dir):
@@ -411,7 +413,7 @@ class FilePlayer:
                 self.getFiles(allfiles, os.path.join(root, dir), extensions)
     @asyncio.coroutine
     def async_play(self, url = None, volume = None):
-        index = random.randint(0, len(self.allFile))
+        index = random.randint(0, len(self.allFile) - 1)
         file = self.allFile[index]
         if url:
             url = self.rootPath + str(url)
@@ -419,7 +421,7 @@ class FilePlayer:
                 file = url        
         yield from self.player.async_play(file, volume=volume, platform=self._channel, nexter=self)
     def next(self):
-        index = random.randint(0, len(self.allFile))
+        index = random.randint(0, len(self.allFile) - 1)
         file = self.allFile[index]       
         self.player.play(file, platform=self._channel, nexter=self)
     def files(self):
@@ -454,7 +456,7 @@ def async_setup(hass, config):
                 filePlayers[key] = FilePlayer(key, channel[key], player)    
         player.set_channels(filePlayers.keys())
     hass.http.register_view(FileListViewer(filePlayers))
-        
+   
     @asyncio.coroutine
     def async_handle_play(service):
         url = service.data.get(ATTR_URL) 
@@ -491,6 +493,8 @@ def async_setup(hass, config):
             volume = "80"
         yield from tts.async_play_tts(message, volume)
         
+    hass.services.async_register(DOMAIN, SERVICE_TURN_ON, async_handle_play, schema=SERVICE_PLAY_SCHEMA)    
+    hass.services.async_register(DOMAIN, SERVICE_TURN_OFF, async_handle_stop, schema=SERVICE_broadcast_SCHEMA)   
     hass.services.async_register(DOMAIN, SERVICE_PLAY, async_handle_play, schema=SERVICE_PLAY_SCHEMA)    
     hass.services.async_register(DOMAIN, SERVICE_STOP, async_handle_stop, schema=SERVICE_broadcast_SCHEMA)    
     hass.services.async_register(DOMAIN, SERVICE_TOGGLE, async_handle_toggle, schema=SERVICE_broadcast_SCHEMA)  
