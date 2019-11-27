@@ -1,0 +1,13 @@
+# Describes the format for available radio services
+
+report_address:
+  description: Report someone's location to [tts_domain.tts_service], tranfer address information via method's field [tts_message].
+  fields:
+    entity_id:
+      description: Name(s) of entities to report.
+      example: 'device_tracker.dylan'
+    friendly_name:
+      description: Title of entity, the report message such as： 牛大宝当前位于四川省成都市郫都区东大街288号，距离你0.1公里.
+      example: '牛大宝'
+          
+

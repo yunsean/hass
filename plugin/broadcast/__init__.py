@@ -32,12 +32,14 @@ from homeassistant.const import (
 SERVICE_TURN_ON = "turn_on"
 SERVICE_TURN_OFF = "turn_off"
 SERVICE_PLAY = "play"
+SERVICE_RELOAD = "reload"
 SERVICE_STOP = "stop"
 SERVICE_TOGGLE = "toggle"
 SERVICE_SET_VOLUME = "set_volume"
 SERVICE_ADD_VOLUME = "add_volume"
 SERVICE_SUB_VOLUME = "sub_volume"
 SERVICE_PLAY_TTS = "play_tts"
+SERVICE_SET_MODE = "set_mode"
 CONF_MAX_VOLUME = "max_volume"
 CONF_APIKEY = 'api_key'
 CONF_SECRETKEY = 'secret_key'
@@ -51,6 +53,7 @@ ATTR_URL = 'url'
 ATTR_VOLUME = "volume"
 ATTR_MESSAGE = "message"
 ATTR_PLATFORM = "entity_id"
+ATTR_MODE = "mode"
 DOMAIN = 'broadcast'
 
 SERVICE_PLAY_SCHEMA = vol.Schema({
@@ -58,7 +61,10 @@ SERVICE_PLAY_SCHEMA = vol.Schema({
     vol.Optional(ATTR_VOLUME): cv.string,
     vol.Optional(ATTR_ENTITY_ID): cv.entity_id,
     })
-SERVICE_broadcast_SCHEMA = vol.Schema({
+SERVICE_RELOAD_SCHEMA = vol.Schema({
+    vol.Optional(ATTR_ENTITY_ID): cv.entity_id,
+    })
+SERVICE_BROADCAST_SCHEMA = vol.Schema({
     }) 
 SERVICE_SET_VOLUME_SCHEMA = vol.Schema({
     vol.Required(ATTR_VOLUME): cv.string,
@@ -66,6 +72,10 @@ SERVICE_SET_VOLUME_SCHEMA = vol.Schema({
 SERVICE_PLAY_TTS_SCHEMA = vol.Schema({
     vol.Required(ATTR_MESSAGE): cv.string,
     vol.Optional(ATTR_VOLUME): cv.string,
+    }) 
+SERVICE_SET_MODE_SCHEMA = vol.Schema({
+    vol.Optional(ATTR_ENTITY_ID): cv.entity_id,
+    vol.Required(ATTR_MODE): cv.string,
     })    
 
 CONFIG_SCHEMA = vol.Schema({
@@ -125,6 +135,7 @@ class AudioPlayer:
                         "url": str(self._url) if (self._platform == channel and self._url) else "None",
                         "volume": str(self._volume),
                         "name": channel,
+                        "mode": self._channels[channel].mode(),
                         "friendly_name": channel
                     })
         
@@ -389,20 +400,26 @@ class RadioPlayer:
         if not url:
             url = self._url
         self._url = url    
+        _LOGGER.info("will play" + str(url))
         yield from self._player.async_play(url, volume=volume, platform=self._platform, nexter=self) 
     def next(self): 
-        self._player.play(self._url, platform=self._platform, nexter=self)
+        #self._player.play(self._url, platform=self._platform, nexter=self)
+        _LOGGER.error("unsupport next()")
     def name(self):
         return self._name
+    def mode(self):
+        return 'single'
         
 class FilePlayer:
     def __init__(self, channel, rootPath, player):
+        self._mode = 'random' #order single
         self._channel = channel
         self.player = player
         self.allFile = []
+        self._last_index = 0
         self.rootPath = rootPath.rstrip('/')
         self.getFiles(self.allFile, self.rootPath, ['.mp3', '.aac', '.flac', '.wav', '.DTS', '.MP3', '.ape', '.WAV'])
-        _LOGGER.error(rootPath + ' contain ' + str(len(self.allFile)) + ' files')
+        _LOGGER.info(rootPath + ' contain ' + str(len(self.allFile)) + ' files')
     def getFiles(self, allfiles, dir, extensions):
         for root, dirs, files in os.walk(dir):
             for filename in files:
@@ -413,19 +430,48 @@ class FilePlayer:
                 self.getFiles(allfiles, os.path.join(root, dir), extensions)
     @asyncio.coroutine
     def async_play(self, url = None, volume = None):
-        index = random.randint(0, len(self.allFile) - 1)
+        if len(self.allFile) < 1:
+            self.getFiles(self.allFile, self.rootPath, ['.mp3', '.aac', '.flac', '.wav', '.DTS', '.MP3', '.ape', '.WAV'])
+        if self._mode == 'single':    
+            index = self._last_index
+        elif self._mode == 'order': 
+            index = self._last_index + 1
+        else:  
+            index = random.randint(0, len(self.allFile) - 1)
+        if index >= len(self.allFile) or index < 0:
+            index = 0
         file = self.allFile[index]
         if url:
             url = self.rootPath + str(url)
             if os.path.exists(url):
-                file = url        
+                file = url  
+                index = self.allFile.index(url)
+        self._last_index = index              
         yield from self.player.async_play(file, volume=volume, platform=self._channel, nexter=self)
+    @asyncio.coroutine
+    def async_reload(self):
+        self.getFiles(self.allFile, self.rootPath, ['.mp3', '.aac', '.flac', '.wav', '.DTS', '.MP3', '.ape', '.WAV'])
+    @asyncio.coroutine
+    def async_set_mode(self, mode):
+        self._mode = mode
+    def mode(self):
+        return self._mode    
     def next(self):
-        index = random.randint(0, len(self.allFile) - 1)
-        file = self.allFile[index]       
+        if self._mode == 'single':    
+            index = self._last_index
+        elif self._mode == 'order': 
+            index = self._last_index + 1
+        else:
+            index = random.randint(0, len(self.allFile) - 1)
+        if index >= len(self.allFile):
+            index = 0
+        file = self.allFile[index] 
+        self._last_index = index      
         self.player.play(file, platform=self._channel, nexter=self)
     def files(self):
         result = []
+        if len(self.allFile) < 1:
+            self.getFiles(self.allFile, self.rootPath, ['.mp3', '.aac', '.flac', '.wav', '.DTS', '.MP3', '.ape', '.WAV'])
         for file in self.allFile:
             result.append(file.replace(self.rootPath, ''))
         return json.dumps(result)
@@ -454,7 +500,7 @@ def async_setup(hass, config):
         for channel in channels:
             for key in channel:
                 filePlayers[key] = FilePlayer(key, channel[key], player)    
-        player.set_channels(filePlayers.keys())
+        player.set_channels(filePlayers)
     hass.http.register_view(FileListViewer(filePlayers))
    
     @asyncio.coroutine
@@ -469,6 +515,14 @@ def async_setup(hass, config):
             yield from filePlayers[platform].async_play(url, volume)
         else:
             yield from player.async_play(url, volume, platform)
+    @asyncio.coroutine
+    def async_handle_reload(service):
+        entity_id = service.data.get(ATTR_ENTITY_ID) 
+        platform = None
+        if entity_id != None and str(entity_id).startswith(DOMAIN):
+            platform = str(entity_id).replace(DOMAIN + ".", "")
+        if platform and platform in filePlayers:
+            yield from filePlayers[platform].async_reload()
     @asyncio.coroutine
     def async_handle_stop(service):
         yield from player.async_stop()
@@ -486,6 +540,16 @@ def async_setup(hass, config):
         volume = service.data.get(ATTR_VOLUME) 
         yield from player.async_set_volume(int(volume))
     @asyncio.coroutine
+    def async_handle_set_mode(service):
+        entity_id = service.data.get(ATTR_ENTITY_ID) 
+        mode = service.data.get(ATTR_MODE) 
+        platform = None
+        if entity_id != None and str(entity_id).startswith(DOMAIN):
+            platform = str(entity_id).replace(DOMAIN + ".", "")
+        if platform and platform in filePlayers:
+            yield from filePlayers[platform].async_set_mode(mode)
+            player.update_state()
+    @asyncio.coroutine
     def async_handle_play_tts(service):
         message = service.data.get(ATTR_MESSAGE) 
         volume = service.data.get(ATTR_VOLUME) 
@@ -494,12 +558,14 @@ def async_setup(hass, config):
         yield from tts.async_play_tts(message, volume)
         
     hass.services.async_register(DOMAIN, SERVICE_TURN_ON, async_handle_play, schema=SERVICE_PLAY_SCHEMA)    
-    hass.services.async_register(DOMAIN, SERVICE_TURN_OFF, async_handle_stop, schema=SERVICE_broadcast_SCHEMA)   
+    hass.services.async_register(DOMAIN, SERVICE_TURN_OFF, async_handle_stop, schema=SERVICE_BROADCAST_SCHEMA)   
     hass.services.async_register(DOMAIN, SERVICE_PLAY, async_handle_play, schema=SERVICE_PLAY_SCHEMA)    
-    hass.services.async_register(DOMAIN, SERVICE_STOP, async_handle_stop, schema=SERVICE_broadcast_SCHEMA)    
-    hass.services.async_register(DOMAIN, SERVICE_TOGGLE, async_handle_toggle, schema=SERVICE_broadcast_SCHEMA)  
-    hass.services.async_register(DOMAIN, SERVICE_ADD_VOLUME, async_handle_add_volume, schema=SERVICE_broadcast_SCHEMA)  
-    hass.services.async_register(DOMAIN, SERVICE_SUB_VOLUME, async_handle_sub_volume, schema=SERVICE_broadcast_SCHEMA)    
+    hass.services.async_register(DOMAIN, SERVICE_RELOAD, async_handle_reload, schema=SERVICE_RELOAD_SCHEMA)    
+    hass.services.async_register(DOMAIN, SERVICE_STOP, async_handle_stop, schema=SERVICE_BROADCAST_SCHEMA)    
+    hass.services.async_register(DOMAIN, SERVICE_TOGGLE, async_handle_toggle, schema=SERVICE_BROADCAST_SCHEMA)  
+    hass.services.async_register(DOMAIN, SERVICE_ADD_VOLUME, async_handle_add_volume, schema=SERVICE_BROADCAST_SCHEMA)  
+    hass.services.async_register(DOMAIN, SERVICE_SUB_VOLUME, async_handle_sub_volume, schema=SERVICE_BROADCAST_SCHEMA)    
     hass.services.async_register(DOMAIN, SERVICE_SET_VOLUME, async_handle_set_volume, schema=SERVICE_SET_VOLUME_SCHEMA)    
-    hass.services.async_register(DOMAIN, SERVICE_PLAY_TTS, async_handle_play_tts, schema=SERVICE_PLAY_TTS_SCHEMA)                  
+    hass.services.async_register(DOMAIN, SERVICE_PLAY_TTS, async_handle_play_tts, schema=SERVICE_PLAY_TTS_SCHEMA)   
+    hass.services.async_register(DOMAIN, SERVICE_SET_MODE, async_handle_set_mode, schema=SERVICE_SET_MODE_SCHEMA)                  
     return True

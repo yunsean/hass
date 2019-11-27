@@ -1,0 +1,10 @@
+{
+  "domain": "composite",
+  "name": "composite",
+  "documentation": "",
+  "requirements": [],
+  "dependencies": [],
+  "codeowners": [
+    "@dylan"
+  ]
+}

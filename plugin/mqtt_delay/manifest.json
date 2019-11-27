@@ -1,0 +1,10 @@
+{
+  "domain": "mqtt_delay",
+  "name": "Mqtt Delay",
+  "documentation": "",
+  "requirements": [],
+  "dependencies": ["mqtt"],
+  "codeowners": [
+    "@dylan"
+  ]
+}

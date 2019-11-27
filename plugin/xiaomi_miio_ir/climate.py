@@ -4,46 +4,55 @@ Support for Xiaomi Mi Home Air Conditioner Companion (AC Partner)
 For more details about this platform, please refer to the documentation
 https://home-assistant.io/components/climate.xiaomi_miio
 """
+import enum
+import json
+import time
 import logging
 import asyncio
-import json
 from functools import partial
 from datetime import timedelta
 import voluptuous as vol
+from typing import Any, Dict, List, Optional
 
 from homeassistant.core import callback
 from homeassistant.components.climate import (
-    ClimateDevice, PLATFORM_SCHEMA, ATTR_OPERATION_MODE, SUPPORT_ON_OFF, SUPPORT_AWAY_MODE, SUPPORT_HOLD_MODE,
-    SUPPORT_TARGET_TEMPERATURE, SUPPORT_OPERATION_MODE, SUPPORT_FAN_MODE, SUPPORT_AUX_HEAT, 
-    SUPPORT_SWING_MODE, )
+    ClimateDevice, PLATFORM_SCHEMA, )
+from homeassistant.components.climate.const import (
+    ATTR_HVAC_MODE, DOMAIN, HVAC_MODES, HVAC_MODE_OFF, HVAC_MODE_HEAT, 
+    HVAC_MODE_COOL, HVAC_MODE_AUTO, HVAC_MODE_DRY, HVAC_MODE_FAN_ONLY,
+    SUPPORT_SWING_MODE, SUPPORT_FAN_MODE, SUPPORT_AUX_HEAT, SUPPORT_TARGET_TEMPERATURE, )
 from homeassistant.const import (
-    TEMP_CELSIUS, ATTR_TEMPERATURE, ATTR_UNIT_OF_MEASUREMENT, 
-    CONF_NAME, CONF_HOST, CONF_TOKEN, )
+    ATTR_ENTITY_ID, ATTR_TEMPERATURE, ATTR_UNIT_OF_MEASUREMENT, CONF_NAME,
+    CONF_HOST, CONF_TOKEN, CONF_TIMEOUT, TEMP_CELSIUS, )
 from homeassistant.exceptions import PlatformNotReady
 from homeassistant.helpers.event import async_track_state_change
 import homeassistant.helpers.config_validation as cv
+from homeassistant.util.dt import utcnow
 from homeassistant.util.json import load_json, save_json
 
 _LOGGER = logging.getLogger(__name__)
-CONFIGURATION_FILE = '.climate_ir.conf'
-CONFIG_FILE_PATH = ""
 ATTR_DEVICES = 'climates'
-CONFIG_FILE = {ATTR_DEVICES: {}}
+CONFIG_FILENAME = '.xiaomi_miio_ir' 
 
-REQUIREMENTS = ['python-miio>=0.4.0']
-DEPENDENCIES = ['sensor']
+SUCCESS = ['ok']
 
 DEFAULT_NAME = 'Xiaomi AC Companion With Ir'
+DATA_KEY = 'climate.xiaomi_miio_ir'
+TARGET_TEMPERATURE_STEP = 1
 
+DEFAULT_TIMEOUT = 10
+DEFAULT_SLOT = 30
+
+ATTR_AIR_CONDITION_MODEL = 'ac_model'
 ATTR_SWING_MODE = 'swing_mode'
-ATTR_FAN_SPEED = 'fan_speed'
+ATTR_SWING_MODE = 'swing_mode'
+ATTR_FAN_MODE = 'fan_mode'
 ATTR_LOAD_POWER = 'load_power'
 ATTR_AUX_HEAT = 'aux_heat'
+ATTR_LED = 'led'
 
-SUPPORT_FLAGS = (SUPPORT_ON_OFF |
-                 SUPPORT_TARGET_TEMPERATURE |
-                 SUPPORT_FAN_MODE |
-                 SUPPORT_OPERATION_MODE)
+SUPPORT_FLAGS = (SUPPORT_TARGET_TEMPERATURE |
+                 SUPPORT_FAN_MODE)
 
 CONF_SENSOR = 'target_sensor'
 CONF_MIN_TEMP = 'min_temp'
@@ -55,6 +64,8 @@ CONF_SWING = 'swing_list'
 CONF_AUX_HEAT = 'support_aux_heat'
 CONF_IS_LUMI = 'is_lumi'
 CONF_MIN_POWER = 'min_work_power'
+
+SCAN_INTERVAL = timedelta(seconds=15)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_HOST): cv.string,
@@ -72,23 +83,11 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Optional(CONF_MIN_POWER, default=0): vol.Coerce(int),
 })
 
-
 # pylint: disable=unused-argument
 @asyncio.coroutine
 def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
     """Set up the air conditioning companion from config."""
     from miio import AirConditioningCompanion, DeviceException
-    
-    global CONFIG_FILE
-    global CONFIG_FILE_PATH
-    CONFIG_FILE_PATH = hass.config.path(CONFIGURATION_FILE)
-    CONFIG_FILE = load_json(CONFIG_FILE_PATH)    
-    try:
-        save_json(CONFIG_FILE_PATH, CONFIG_FILE)
-    except HomeAssistantError:
-        _LOGGER.error("load climate's states failed")
-    if CONFIG_FILE == {}:
-        CONFIG_FILE[ATTR_DEVICES] = {}
 
     host = config.get(CONF_HOST)
     name = config.get(CONF_NAME)
@@ -113,11 +112,12 @@ def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
         if len(parts) > 1:
             instructsMap[parts[0]] = parts[1]
     _LOGGER.info("Initializing with host %s (token %s...)", host, token[:5])
+
     try:
         device = AirConditioningCompanion(host, token)
         device_info = device.info()
         model = device_info.model
-        unique_id = "{}-{}-ir".format(model, device_info.mac_address)
+        unique_id = "{}-{}".format(model, device_info.mac_address)
         _LOGGER.info("%s %s %s detected",
                      model,
                      device_info.firmware_version,
@@ -129,7 +129,6 @@ def async_setup_platform(hass, config, async_add_devices, discovery_info=None):
     async_add_devices([XiaomiAirConditioningCompanion(
         hass, name, device, unique_id, sensor_entity_id, min_temp, max_temp, instructsMap, fan_mode_list, operation_list, swing_list, aux_heat, is_lumi, min_power)],
         update_before_add=True)
-
 
 class XiaomiAirConditioningCompanion(ClimateDevice):
     """Representation of a Xiaomi Air Conditioning Companion."""
@@ -143,8 +142,6 @@ class XiaomiAirConditioningCompanion(ClimateDevice):
         self._unique_id = unique_id
         self._sensor_entity_id = sensor_entity_id
         self._support_aux_heat = aux_heat
-        self._support_away_mode = True if ('away-mode-on' in  instructsMap and 'away-mode-off' in instructsMap) else False
-        self._support_hold_mode = True if ('hold-mode-on' in  instructsMap and 'hold-mode-off' in instructsMap) else False
         self._support_swing_mode = True if (swing_list != None and len(swing_list) > 1) else False
 
         self._available = False
@@ -152,8 +149,8 @@ class XiaomiAirConditioningCompanion(ClimateDevice):
             ATTR_LOAD_POWER: None,
             ATTR_TEMPERATURE: None,
             ATTR_SWING_MODE: None,
-            ATTR_FAN_SPEED: None,
-            ATTR_OPERATION_MODE: None,
+            ATTR_FAN_MODE: None,
+            ATTR_HVAC_MODE: None,
         }
 
         self._min_temp = min_temp
@@ -172,16 +169,21 @@ class XiaomiAirConditioningCompanion(ClimateDevice):
         self._min_power = min_power
         self._turn_on = False
         self._power_on = False
+        self._latest_power_on = time.time()
         
-        try:
-            state = CONFIG_FILE[ATTR_DEVICES][self._unique_id]
+        try:            
+            with open(self.hass.config.path(CONFIG_FILENAME)) as fptr:
+                states = json.loads(fptr.read())
+            if not states:
+                states = {ATTR_DEVICES: {}}
+            state = states[ATTR_DEVICES][self._unique_id]
             self._current_swing_mode = state['swing_mode']
             self._current_operation = state['operation']
             self._current_fan_mode = state['fan_mode']
             self._target_temperature = state['temperature']
             self._aux_heat = state['aux_heat']
         except:
-            _LOGGER.error("load latest state failed.")
+            _LOGGER.warn("load latest state failed.")
 
         if sensor_entity_id:
             async_track_state_change(hass, sensor_entity_id, self._async_sensor_changed)
@@ -206,21 +208,27 @@ class XiaomiAirConditioningCompanion(ClimateDevice):
         if new_state is None:
             return
         self._async_update_temp(new_state)
-        
+
+
     def save_config(self):
-        global CONFIG_FILE
-        global CONFIG_FILE_PATH
-        data = {"operation": self._current_operation,
+        try:
+            with open(self.hass.config.path(CONFIG_FILENAME)) as fptr:
+                states = json.loads(fptr.read())
+        except:
+            states = None
+        if not states:
+            states = {ATTR_DEVICES: {}}
+        states[ATTR_DEVICES][self._unique_id] = {
+            "operation": self._current_operation,
             "fan_mode": self._current_fan_mode,
             "swing_mode": self._current_swing_mode,
             "temperature": self._target_temperature,
-            "aux_heat": self._aux_heat}
-        CONFIG_FILE[ATTR_DEVICES][self._unique_id] = data
-        try:
-            save_json(CONFIG_FILE_PATH, CONFIG_FILE)
-        except HomeAssistantError:
-            _LOGGER.error("save climate's states failed")
+            "aux_heat": self._aux_heat
+        } 
+        with open(self.hass.config.path(CONFIG_FILENAME), "w") as fptr:
+            fptr.write(json.dumps(states))
 
+    
     @asyncio.coroutine
     def _try_command(self, key = None):
         """Call a AC companion command handling error messages."""
@@ -308,6 +316,8 @@ class XiaomiAirConditioningCompanion(ClimateDevice):
         result = yield from self._try_command()
         if not result:
             self._turn_on = state
+        else:    
+            self._latest_power_on = time.time()
 
     @asyncio.coroutine
     def async_turn_off(self, **kwargs) -> None:
@@ -330,15 +340,20 @@ class XiaomiAirConditioningCompanion(ClimateDevice):
                 self._power_on = state.is_on
             else:
                 self._power_on = state.load_power >= self._min_power
-            _LOGGER.error("Got new state: %s", state)
+            if self._power_on:
+                self._latest_power_on = time.time()
+            if self._turn_on and (time.time() - self._latest_power_on > 120):
+                self._turn_on = False
             self._state_attrs.update({
                 ATTR_LOAD_POWER: state.load_power,
                 ATTR_TEMPERATURE: self._target_temperature,
                 ATTR_SWING_MODE: self._current_swing_mode,
-                ATTR_FAN_SPEED: self._current_fan_mode,
-                ATTR_OPERATION_MODE: self._current_operation,
+                ATTR_FAN_MODE: self._current_fan_mode,
+                ATTR_HVAC_MODE: self._current_operation,
                 ATTR_AUX_HEAT: self._aux_heat,
+                ATTR_LED: state.led,
             })
+            self._available = True
         except DeviceException as ex:
             self._available = False
             _LOGGER.error("Got exception while fetching the state: %s", ex)
@@ -351,39 +366,51 @@ class XiaomiAirConditioningCompanion(ClimateDevice):
             mode = mode | SUPPORT_SWING_MODE
         if self._support_aux_heat:
             mode = mode | SUPPORT_AUX_HEAT
-        if self._support_away_mode:
-            mode = mode | SUPPORT_AWAY_MODE
-        if self._support_hold_mode:
-            mode = mode | SUPPORT_HOLD_MODE
         return mode
+
+    @property
+    def state(self) -> str:
+        """Return the current state."""
+        if self._turn_on or self._power_on:
+            return self._current_operation
+        else:
+            return HVAC_MODE_OFF
+
     @property
     def min_temp(self):
         """Return the minimum temperature."""
         return self._min_temp
+
     @property
     def max_temp(self):
         """Return the maximum temperature."""
         return self._max_temp
+
     @property
     def target_temperature_step(self):
         """Return the target temperature step."""
         return 1
+
     @property
     def should_poll(self):
         """Return the polling state."""
         return True
+
     @property
     def unique_id(self):
         """Return an unique ID."""
         return self._unique_id
+
     @property
     def name(self):
         """Return the name of the climate device."""
         return self._name
+
     @property
     def available(self):
         """Return true when state is known."""
-        return True
+        return self._available
+
     @property
     def device_state_attributes(self):
         """Return the state attributes of the device."""
@@ -392,6 +419,7 @@ class XiaomiAirConditioningCompanion(ClimateDevice):
     def temperature_unit(self):
         """Return the unit of measurement."""
         return TEMP_CELSIUS
+
     @property
     def current_temperature(self):
         """Return the current temperature."""
@@ -400,75 +428,52 @@ class XiaomiAirConditioningCompanion(ClimateDevice):
     def target_temperature(self):
         """Return the temperature we try to reach."""
         return self._target_temperature
+
     @property
-    def current_operation(self):
-        """Return current operation ie. heat, cool, idle."""
-        return self._current_operation
+    def hvac_mode(self):
+        """Return new hvac mode ie. heat, cool, fan only."""
+        return self._current_operation.lower()
     @property
-    def operation_list(self):
-        """Return the list of available operation modes."""
-        return self._operation_list.split(',')
+    def hvac_modes(self):
+        """Return the list of available hvac modes."""
+        return self._operation_list.lower().split(',')
+
     @property
-    def current_fan_mode(self):
+    def fan_mode(self):
         """Return the current fan mode."""
-        return self._current_fan_mode
+        return self._current_fan_mode.lower()
     @property
-    def fan_list(self):
+    def fan_modes(self):
         """Return the list of available fan modes."""
-        return self._fan_mode_list.split(',')
+        return self._fan_mode_list.lower().split(',')
+
     @property
-    def is_on(self) -> bool:
-        """Return True if the entity is on."""
-        return self._turn_on or self._power_on
-        
-    @asyncio.coroutine
-    def async_turn_aux_heat_on(self):
-        """Turn auxiliary heater on.
-        This method must be run in the event loop and returns a coroutine.
-        """
-        self._aux_heat = True
-        result = yield from self._try_command()  
-    @asyncio.coroutine     
-    def async_turn_aux_heat_off(self):
-        """Turn auxiliary heater off.
-        This method must be run in the event loop and returns a coroutine.
-        """
-        self._aux_heat = False
-        result = yield from self._try_command() 
+    def swing_mode(self):
+        """Return the current swing setting."""
+        return self._current_swing_mode.lower()
+    @property
+    def swing_modes(self):
+        """List of available swing modes."""
+        return self._swing_list.lower().split(',')
 
-    @asyncio.coroutine   
-    def async_turn_away_mode_on(self):
-        """Turn away mode on.
+    @property
+    def preset_mode(self) -> Optional[str]:
+        return None
+    @property
+    def preset_modes(self) -> Optional[List[str]]:
+        return None
 
-        This method must be run in the event loop and returns a coroutine.
-        """
-        self._try_command('away-mode-on')
-    @asyncio.coroutine   
-    def async_turn_away_mode_off(self):
-        """Turn away mode off.
+    @property
+    def is_aux_heat(self) -> Optional[bool]:
+        return self._aux_heat    
 
-        This method must be run in the event loop and returns a coroutine.
-        """
-        self._try_command('away-mode-off') 
-         
-    @asyncio.coroutine   
-    def async_set_hold_mode(self, hold_mode):
-        """Set new target hold mode.
-
-        This method must be run in the event loop and returns a coroutine.
-        """
-        if hold_mode:
-            self._try_command('hold-mode-on')
-        else:
-            self._try_command('hold-mode-on')  
-        
     @asyncio.coroutine
     def async_set_temperature(self, **kwargs):
         """Set target temperature."""
         if kwargs.get(ATTR_TEMPERATURE) is not None:
             self._target_temperature = kwargs.get(ATTR_TEMPERATURE)
-        if kwargs.get(ATTR_OPERATION_MODE) is not None:
-            self._current_operation = kwargs.get(ATTR_OPERATION_MODE)
+        if kwargs.get(ATTR_HVAC_MODE) is not None:
+            self._current_operation = kwargs.get(ATTR_HVAC_MODE)
         yield from self._try_command()
     @asyncio.coroutine
     def async_set_swing_mode(self, swing_mode):
@@ -476,21 +481,23 @@ class XiaomiAirConditioningCompanion(ClimateDevice):
         self._current_swing_mode = swing_mode
         yield from self._try_command()
     @asyncio.coroutine
-    def async_set_fan_mode(self, fan):
+    def async_set_fan_mode(self, fan_mode):
         """Set the fan mode."""
-        self._current_fan_mode = fan
+        self._current_fan_mode = fan_mode
         yield from self._try_command()
     @asyncio.coroutine
-    def async_set_operation_mode(self, operation_mode):
+    def async_set_hvac_mode(self, hvac_mode):
         """Set operation mode."""
-        self._current_operation = operation_mode
+        self._current_operation = hvac_mode
+        yield from self._try_command()
+    @asyncio.coroutine
+    def async_turn_aux_heat_on(self) -> None:
+        """Turn auxiliary heater on."""
+        self._aux_heat = True
+        yield from self._try_command()
+    @asyncio.coroutine
+    def async_turn_aux_heat_off(self) -> None:
+        """Turn auxiliary heater off."""
+        self._aux_heat = False
         yield from self._try_command()
 
-    @property
-    def current_swing_mode(self):
-        """Return the current swing setting."""
-        return self._current_swing_mode
-    @property
-    def swing_list(self):
-        """List of available swing modes."""
-        return self._swing_list.split(',')

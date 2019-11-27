@@ -1,0 +1,78 @@
+# Describes the format for available radio services
+
+turn_on:
+  description: Turn on the player.
+  fields:
+    entity_id:
+      description: Name(s) of entities to turn on.
+      example: 'broadcast.piano'
+    volume:
+      description: Volume of player.
+      example: 50
+    url:
+      description: The url or the file path to play.
+      example: 'Oh Father.mp3'
+
+toggle:
+  description: Toggles the player.
+
+turn_off:
+  description: Turn off the player.
+
+play:
+  description: Turn on the player.
+  fields:
+    entity_id:
+      description: Name(s) of entities to turn on.
+      example: 'broadcast.piano'
+    volume:
+      description: Volume of player.
+      example: 50
+    url:
+      description: The url or the file path to play.
+      example: 'Oh Father.mp3'
+
+stop:
+  description: Turn off the player.      
+
+reload:
+  description: Reload the file list for player.
+  fields:
+    entity_id:
+      description: Name(s) of entities to turn on.
+      example: 'broadcast.piano'
+
+add_volume:
+  description: Turn up the volume of player. 
+
+sub_volume:
+  description: Turn down the volume of player. 
+
+set_volume:
+  description: Set volume of player.
+  fields:
+    volume:
+      description: Volume of player.
+      example: 50 
+
+play_tts:
+  description: Send tts message to player and play it.
+  fields:
+    message:
+      description: The content to play.
+      example: 'Hello'
+    volume:
+      description: Volume to play.
+      example: 50
+
+set_mode:
+  description: Set play mode for player.
+  fields:
+    entity_id:
+      description: Name(s) of entities to turn on.
+      example: 'broadcast.piano'
+    mode:
+      description: Play mode, random order single.
+      example: 'random'
+          
+

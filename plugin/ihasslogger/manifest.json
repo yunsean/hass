@@ -1,0 +1,10 @@
+{
+  "domain": "ihasslogger",
+  "name": "ihasslogger",
+  "documentation": "",
+  "requirements": [],
+  "dependencies": ["http"],
+  "codeowners": [
+    "@dylan"
+  ]
+}

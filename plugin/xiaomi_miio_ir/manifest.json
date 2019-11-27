@@ -1,0 +1,10 @@
+{
+  "domain": "xiaomi_miio_ir",
+  "name": "Xiaomi Mi and Aqara Air Conditioning Companion With IR",
+  "documentation": "",
+  "requirements": ["python-miio>=0.4.5"],
+  "dependencies": [],
+  "codeowners": [
+    "@dylan"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "domain": "broadcast",
+  "name": "Broadcast",
+  "documentation": "",
+  "requirements": ["python-mpv"],
+  "dependencies": [],
+  "codeowners": [
+    "@dylan"
+  ]
+}
